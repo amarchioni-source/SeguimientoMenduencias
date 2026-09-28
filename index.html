@@ -112,16 +112,9 @@ table.matriz thead tr:nth-child(3) th.vh{position:sticky;top:44px;font-family:"B
   font-size:17px;font-weight:700;color:var(--ink);letter-spacing:.02em;padding-top:2px;padding-bottom:7px}
 table.matriz th.vh.late{background:#F6EEF8}
 table.matriz thead tr:nth-child(3) th.vh.late{color:#7B2D8E}
-table.matriz th.vh.ship{background:#E7F4EC}
-table.matriz thead tr:nth-child(3) th.vh.ship{color:#0F7A5A}
-table.matriz thead tr:nth-child(3) th.vh i{font-style:normal;font-size:10px;color:var(--ink3);font-weight:500}
 table.matriz th[rowspan]{position:sticky;top:0;z-index:4}
 td.vcol{background:#FCFDFE}
 td.vcol.late{background:#FBF6FC}
-td.vcol.ship{background:#F2F9F4}
-td.vcol.ship.late{background:#FBF6FC}
-table.matriz th.vh.ship.late{background:#F6EEF8}
-table.matriz thead tr:nth-child(3) th.vh.ship.late{color:#7B2D8E}
 .stk1{position:sticky;left:0;z-index:3;background:var(--panel);border-right:1px solid var(--line);min-width:210px}
 .stk2{position:sticky;left:210px;z-index:3;background:var(--panel);border-right:2px solid var(--line)}
 th.stk1,th.stk2{z-index:6!important}
@@ -196,9 +189,7 @@ tr.row:hover td.av{background:#F9E9B6}
 
 .tagc{display:inline-block;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;
   background:#EDE4F5;color:#6B3E8E;padding:1px 5px;border-radius:2px;margin-left:6px;vertical-align:1px}
-table.matriz thead tr:nth-child(3) th.vh .tagc{margin-left:0;margin-bottom:2px}
-.tag-ship{background:#CBE9D6;color:#0F7A5A}
-.tag-rem{background:#E8ECEF;color:var(--ink2)}
+sup.mix{font-size:8px;color:var(--amb);font-weight:700;margin-left:2px;letter-spacing:.02em}
 
 .kpi{text-align:left;width:100%;cursor:pointer;font:inherit;color:inherit;border:none;display:block}
 .kpi:hover{background:linear-gradient(#232F36,#1B2429)}
@@ -981,36 +972,53 @@ function ordenVentas(ventas){
   });
 }
 
-/* embarques ya cargados en el sistema para una venta (por nro de venta) */
+/* embarques ya creados (pendientes de carga) para una venta, por nro de venta */
 function shipsDeVenta(nro){
   return (DATA.ships||[]).filter(s=>s.venta===nro);
 }
 
-/* de "1 columna = 1 venta" a "columnas = cada shipment ya creado (pendiente de carga,
-   con cliente/semana confirmados) + 1 columna de remanente sin asignar todavía a
-   ningún shipment". Ninguna de las dos está "ya cargada": ambas son saldo pendiente,
-   solo que una parte ya tiene shipment creado y la otra parte no. */
+/* columnas = cada shipment ya creado (pendiente de carga, cliente/semana confirmados)
+   + 1 columna de remanente ("venta") con lo que todavia no tiene shipment asignado.
+   Ninguna de las dos esta cargada: ambas son saldo pendiente.
+   Un mismo shipment que reparte carga entre varias ventas (MIX) se muestra UNA SOLA VEZ
+   (igual que en la planilla de China), con el total sumado y el detalle de a que venta
+   pertenece cada parte en el tooltip - no se repite una columna por cada venta. */
 function columnasDeVentas(ventasOrd){
   const cols=[];
+  const nrosMostrados = new Set();
   ventasOrd.forEach(v=>{
     const ships = shipsDeVenta(v.nro);
     const restante = {...v.items};
     ships.forEach(s=>{
-      const wnum = /^W\d+$/.test((s.semana||'').trim()) ? +s.semana.trim().slice(1) : null;
-      cols.push({tipo:'ship', ventaIdx:v.idx, venta:v, nro:s.nro, cliente:s.consignee, puerto:s.puerto,
-        week:s.semana, wnum, items:s.items, provisoria:false});
       Object.entries(s.items).forEach(([cod,kg])=>{
         restante[cod] = (restante[cod]||0) - kg;
         if(restante[cod] <= 0.01) delete restante[cod];
       });
+      if(nrosMostrados.has(s.nro)) return; // ya se mostro esta columna (shipment compartido)
+      nrosMostrados.add(s.nro);
+      const todos = (DATA.ships||[]).filter(x=>x.nro===s.nro);
+      const itemsTotal = {};
+      todos.forEach(x=>Object.entries(x.items).forEach(([cod,kg])=>{ itemsTotal[cod]=(itemsTotal[cod]||0)+kg; }));
+      const clientes = [...new Set(todos.map(x=>x.consignee))];
+      const semana = todos[0].semana;
+      const wnum = /^W\d+$/.test((semana||'').trim()) ? +semana.trim().slice(1) : null;
+      cols.push({tipo:'ship', ventaIdx:v.idx, nro:s.nro, cliente:clientes.length>1?clientes[0]+' (+otros)':clientes[0],
+        puerto:todos[0].puerto, week:semana, wnum, items:itemsTotal, provisoria:false});
     });
-    if(Object.keys(restante).length){
-      cols.push({tipo:'rem', ventaIdx:v.idx, venta:v, nro:v.nro, cliente:ships.length?null:v.cliente,
+    if(Object.keys(restante).length || !ships.length){
+      cols.push({tipo:'rem', ventaIdx:v.idx, nro:v.nro, cliente:ships.length?null:v.cliente,
         puerto:ships.length?null:v.puerto, week:ships.length?null:v.week, wnum:ships.length?null:v.wnum,
-        items:restante, provisoria:v.provisoria});
+        items:ships.length?restante:v.items, provisoria:v.provisoria});
     }
   });
   return cols;
+}
+
+/* recorta cualquier texto de encabezado a un largo fijo ANTES de renderizar, para
+   que nunca pueda envolver en mas de una linea (eso rompe el anclado sticky). */
+function corta(t, n){
+  t = t||'—';
+  return t.length>n ? t.slice(0,n-1)+'…' : t;
 }
 
 function viewVtas(R, ventas){
@@ -1029,7 +1037,7 @@ function viewVtas(R, ventas){
   if(qv) ordV=ordV.filter(v=>{
     const ships = shipsDeVenta(v.nro);
     const t=norm(v.nro+' '+(v.cliente||'')+' '+(v.week||'')+' '+(v.puerto||'')+' '+
-      ships.map(s=>s.nro+' '+(s.consignee||'')+' '+(s.semana||'')+' '+(s.puerto||'')).join(' '));
+      ships.map(s=>s.nro+' '+(s.consignee||'')+' '+(s.semana||'')).join(' '));
     return qv.split(/\s+/).every(w=>t.includes(w));});
 
   let ord = columnasDeVentas(ordV);
@@ -1046,7 +1054,7 @@ function viewVtas(R, ventas){
     <div class="phead">
       <div class="ptitle">${sel?'Productos de la venta '+sel.nro:'Seguimiento de ventas'}</div>
       <div class="phint">${sel?'Filtrado · las demás columnas muestran en qué otras ventas está comprometido cada producto'
-        :'Cada venta muestra primero los shipments ya creados (pendientes de carga, con cliente/semana confirmados) y al final lo que todavía no tiene shipment asignado · tocá un encabezado para filtrar'}</div>
+        :'Cada venta muestra primero sus shipments creados (pendientes de carga) y al final el remanente sin asignar · tocá un encabezado para filtrar'}</div>
       <div class="tools">
         <input class="inp" id="qvp" placeholder="Filtrar producto" value="${S.qvp}">
         <input class="inp" id="qvv" placeholder="Filtrar cliente o venta" value="${S.qvv}">
@@ -1054,19 +1062,38 @@ function viewVtas(R, ventas){
         :`<button class="chip ${S.soloVta?'on':''}" id="soloVta">Solo códigos vendidos</button>`}</div>
     </div><div class="scroll mtx"></div>
     <div class="phead" style="border-top:1px solid var(--line2);border-bottom:none">
-      <div class="leg leyenda"><span><i style="background:#E7F4EC;border:1px solid #BEE0CC"></i><b>SHIPMENT</b>: creado, pendiente de carga (cliente/semana confirmados)</span>
-      <span><i style="background:#fff;border:1px solid var(--line)"></i><b>VENTA</b>: remanente sin ningún shipment asignado todavía</span>
-      <span><i style="background:#F6EEF8;border:1px solid #DFC7E6"></i>semana de carga vencida</span></div>
+      <div class="leg leyenda"><span><i class="dot d-ok"></i>shipment creado, pendiente de carga</span>
+      <span><i class="dot d-off"></i>venta · remanente sin shipment</span></div>
     </div></div>`);
 
   let h1='', h2='', h3='';
   ord.forEach(col=>{
     const late = col.wnum!=null && col.wnum<DATA.semanaCorte;
     const esRem = col.tipo==='rem';
-    const cls = `vcol${late?' late':''}${esRem?'':' ship'}${sel&&col.ventaIdx===sel.idx?' pick':''}`;
-    h1+=`<th class="${cls} vh" data-v="${col.ventaIdx}">${col.week||'—'}</th>`;
-    h2+=`<th class="${cls} vh cli" data-v="${col.ventaIdx}">${(col.cliente||'—').slice(0,11)}</th>`;
-    h3+=`<th class="${cls} vh nro${col.provisoria?' prov':''}" data-v="${col.ventaIdx}" title="${esRem?'Venta · remanente todavía sin shipment asignado':'Shipment creado · pendiente de carga'}"><span class="tagc ${esRem?'tag-rem':'tag-ship'}">${esRem?'VENTA':'SHIPMENT'}</span><br>${col.nro}</th>`;
+    const cls = `vcol${late?' late':''}${sel&&col.ventaIdx===sel.idx?' pick':''}`;
+    h1+=`<th class="${cls} vh" data-v="${col.ventaIdx}" title="${col.week||'sin semana'}">${corta(col.week,10)}</th>`;
+    h2+=`<th class="${cls} vh cli" data-v="${col.ventaIdx}" title="${col.cliente||'sin cliente'}">${corta(col.cliente,11)}</th>`;
+    let title = esRem?'Venta · remanente sin shipment asignado':'Shipment creado · pendiente de carga';
+    const detProd = Object.entries(col.items).map(([cod,kg])=>{
+      const c=CODM[cod]; return (c?c.d:cod)+': '+fmt(kg)+' kg';
+    }).join(' · ');
+    if(detProd) title += ' — '+detProd;
+    let mixMark = '';
+    if(!esRem){
+      const otrosShips = (DATA.ships||[]).filter(s=>s.nro===col.nro);
+      const ventasMix = [...new Set(otrosShips.map(s=>s.venta))];
+      if(ventasMix.length>1){
+        const porVenta = otrosShips.map(s=>{
+          const det = Object.entries(s.items).map(([cod,kg])=>{
+            const c=CODM[cod]; return (c?c.d:cod)+': '+fmt(kg)+' kg';
+          }).join(', ');
+          return 'Vta '+s.venta+' → '+det;
+        }).join(' | ');
+        title += ' · MIX, reparte así: '+porVenta;
+        mixMark = '<sup class="mix">MIX</sup>';
+      }
+    }
+    h3+=`<th class="${cls} vh nro${col.provisoria?' prov':''}" data-v="${col.ventaIdx}" title="${title}"><i class="dot ${esRem?'d-off':'d-ok'}"></i>${corta(col.nro,10)}${mixMark}</th>`;
   });
 
   const extraTh = sel
@@ -1079,8 +1106,7 @@ function viewVtas(R, ventas){
     ord.forEach(col=>{
       const kg=col.items[c.c];
       const late = col.wnum!=null && col.wnum<DATA.semanaCorte;
-      const esRem = col.tipo==='rem';
-      cel+=`<td class="vcol${late?' late':''}${esRem?'':' ship'}${sel&&col.ventaIdx===sel.idx?' pick':''}">${kg?`<span class="n">${fmt(kg)}</span>`:''}</td>`;
+      cel+=`<td class="vcol${late?' late':''}${sel&&col.ventaIdx===sel.idx?' pick':''}">${kg?`<span class="n">${fmt(kg)}</span>`:''}</td>`;
     });
     let extra='';
     if(sel){
@@ -1100,8 +1126,7 @@ function viewVtas(R, ventas){
   let tot='';
   ord.forEach(col=>{
     const t=filas.reduce((a,c)=>a+(col.items[c.c]||0),0);
-    const esRem = col.tipo==='rem';
-    tot+=`<td class="vcol${esRem?'':' ship'}${sel&&col.ventaIdx===sel.idx?' pick':''}">${t?`<span class="n">${fmt(t)}</span>`:''}</td>`;
+    tot+=`<td class="vcol${sel&&col.ventaIdx===sel.idx?' pick':''}">${t?`<span class="n">${fmt(t)}</span>`:''}</td>`;
   });
   body+=`<tr class="tot"><td class="l stk1">TOTAL</td>
     <td class="stk2"><span class="n">${fmt(filas.reduce((a,c)=>a+c.stock,0))}</span></td>
@@ -1159,11 +1184,38 @@ function bandaFiltro(R, ventas, v){
         <span><i style="background:#7FB3A2"></i>${fmt(e.prd)} kg los cubre la producción</span>
         ${e.flt>1?`<span><i style="background:var(--rojo)"></i><b style="color:var(--rojo)">${fmt(e.flt)} kg sin cubrir</b></span>`:''}</div>
       ${herm.length?`<div class="herm">Del mismo pedido: ${herm.map(x=>`<button class="chip" data-h="${x.idx}">${x.nro} · ${x.week||'s/f'}</button>`).join('')}</div>`:''}
-
+      ${shipsHTML(v)}
     </div></div>`);
   setTimeout(()=>d.querySelectorAll('[data-h]').forEach(b=>b.onclick=()=>{S.venta=+b.dataset.h;render();}));
   return d;
 }
+
+/* detalle de shipments ya creados de una venta (pendientes de carga) + lo que
+   todavia no tiene shipment asignado. Solo informativo, dentro del panel de detalle. */
+function shipsHTML(v){
+  const ships = shipsDeVenta(v.nro);
+  if(!ships.length) return '';
+  const restante = {...v.items};
+  ships.forEach(s=>Object.entries(s.items).forEach(([cod,kg])=>{
+    restante[cod]=(restante[cod]||0)-kg;
+    if(restante[cod]<=0.01) delete restante[cod];
+  }));
+  const li = (label, cliente, semana, items, cls) => {
+    const t = Object.values(items).reduce((a,b)=>a+b,0);
+    const det = Object.entries(items).map(([cod,kg])=>{
+      const c=CODM[cod]; return (c?c.d:cod)+': '+fmt(kg)+' kg';
+    }).join(' · ');
+    return `<div class="ship"><span class="shnro"><i class="dot ${cls}"></i>${label}</span>
+      <span class="shsem">${semana||'—'}</span>
+      <span class="shkg">${fmt(t)} kg</span>
+      <span class="shit">${cliente||'sin cliente'} · ${det}</span></div>`;
+  };
+  let rows = ships.map(s=>li('SHIPMENT '+s.nro, s.consignee, s.semana, s.items, 'd-ok')).join('');
+  if(Object.keys(restante).length) rows += li('SIN ASIGNAR', null, null, restante, 'd-off');
+  return `<div class="ships"><div class="shtit">Shipments creados (pendientes de carga) y remanente sin asignar</div>${rows}</div>`;
+}
+
+
 
 function coberturaW(r){
   const pend = r.poolId? r.poolPend : r.pendiente;
