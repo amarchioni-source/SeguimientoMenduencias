@@ -335,6 +335,25 @@ tr.tot td .num{color:#fff}
 @media (prefers-reduced-motion:no-preference){
   .vcard,.chip,.tab{transition:background .12s,color .12s,border-color .12s}
 }
+
+/* ---------- programa / prioridades ---------- */
+.prio{display:inline-flex;gap:4px}
+.pbtn{border:1px solid var(--line);border-radius:var(--r);padding:3px 10px;font-size:12px;color:var(--ink2);background:#fff}
+.pbtn:hover{border-color:var(--frio);color:var(--frio)}
+.pbtn.on{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
+tr.row.psel td{background:#E8F5EE}
+.pbtn.pri.on{background:var(--amb);border-color:var(--amb);color:#fff}
+.pbtn:disabled{cursor:default}
+tr.row.gsep td{border-top:2px solid var(--line)}
+.tag{white-space:nowrap}
+@media print{
+  body.print-prog header,body.print-prog .kpis,body.print-prog .kpidet,body.print-prog .foot,
+  body.print-prog #asignarPanel,body.print-prog .noprint{display:none!important}
+  body.print-prog{background:#fff;color:#000;padding:0}
+  body.print-prog::before{display:none}
+  body.print-prog main{padding:0}
+  body.print-prog .panel{box-shadow:none;border:none}
+}
 </style>
 </head>
 <body>
@@ -432,7 +451,7 @@ const norm = s => (s||'').toString().toLowerCase().normalize('NFD').replace(/[\u
 const el  = (h)=>{const d=document.createElement('div');d.innerHTML=h.trim();return d.firstChild;};
 
 /* ============ MOTOR ============ */
-const S = {tab:'proy', gen:'', q:'', venta:null, colapso:{}, orden:'gen', soloVta:false, form:null, qc:'', gc:'', expCom:null, qvp:'', qvv:'', kpi:null};
+const S = {tab:'proy', gen:'', q:'', venta:null, colapso:{}, orden:'gen', soloVta:false, form:null, qc:'', gc:'', expCom:null, qvp:'', qvv:'', kpi:null, pq:'', pg:'', pfalt:false};
 const CODM = Object.fromEntries(DATA.codigos.map(c=>[c.c,c]));
 const WK = ()=>DATA.semanas.map(s=>s.w);
 
@@ -523,7 +542,7 @@ function estadoVenta(v, R){
 }
 
 /* ============ RENDER ============ */
-const TABS=[['proy','Proyección'],['com','Comercial'],['vta','Seguimiento de ventas'],['rot','Rotación'],['al','Alertas']];
+const TABS=[['proy','Proyección'],['com','Comercial'],['vta','Seguimiento de ventas'],['rot','Rotación'],['al','Alertas'],['prog','Programa']];
 
 let _lastTab=null;
 function render(){
@@ -552,6 +571,7 @@ function render(){
   if(S.tab==='vta')  v.appendChild(viewVtas(R, ventas));
   if(S.tab==='rot')  v.appendChild(viewRot(R));
   if(S.tab==='al')   v.appendChild(viewAlertas(R, ventas));
+  if(S.tab==='prog') v.appendChild(viewProg(R));
   document.getElementById('foot').textContent =
     `Peso por res: tabla de la proyección. Stock: total del código, todas las cámaras. Producción proyectada a ${DATA.semanas.length} semanas desde W${DATA.semanas[0].w}.`;
   if(_keep) requestAnimationFrame(()=>{
@@ -1306,6 +1326,222 @@ function viewAlertas(R, ventas){
   return p;
 }
 
+
+/* ---- vista PROGRAMA: hasta 2 codigos por generico (uno con prioridad) en Firebase + programa para planta ---- */
+const gKey = g => g.replace(/[.#$\[\]\/]/g,'_');
+/* lo guardado por genero: {p: codigo prioritario, s: segundo codigo}. Acepta el formato viejo {c:...} */
+function leerSel(v){ v=v||{}; return {p: v.p||v.c||null, s: v.s||null}; }
+
+/* faltante = kilos por cargar (ventas) que el stock no cubre = lo que hay que producir */
+function infoProg(c, R){
+  const r = R[c.c];
+  const falt = Math.max(0, -r.pendiente);
+  const ws = r.asign.map(a=>a.venta.wnum).filter(w=>w!=null);
+  return {c, stock:c.stock, vendido:r.vendido, falt, prox: ws.length ? Math.min(...ws) : null};
+}
+
+function fechaLarga(){
+  const f = new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  return f.charAt(0).toUpperCase()+f.slice(1);
+}
+
+/* grupos del programa: un genérico con sus 1-2 códigos, el prioritario primero */
+function armarGrupos(sel, R){
+  const grupos=[];
+  Object.entries(sel).forEach(([gk,v])=>{
+    const {p,s}=leerSel(v); const items=[];
+    [[p,'p'],[s,'s']].forEach(([cod,rol])=>{
+      const c = cod && CODM[cod];
+      if(c && !c.virtual && gKey(c.g)===gk) items.push(Object.assign(infoProg(c,R),{rol}));
+    });
+    if(items.length) grupos.push({g:items[0].c.g, items});
+  });
+  return grupos.sort((a,b)=>b.items[0].falt-a.items[0].falt || a.g.localeCompare(b.g));
+}
+
+/* codigos que se agregan a mano al programa (no estan en el stock del dashboard): siempre van primero */
+const PROG_FIJOS = [
+  {g:'GRASA VACUNA F', dest:'PRC', codigos:['FD256510','FD256519'],
+   nota:'Se producen en simultáneo, según el engorde del animal · kilos continuos'}
+];
+
+function textoPrograma(grupos){
+  let t = 'PROGRAMA DE MENUDENCIAS · '+fechaLarga()+'\n';
+  PROG_FIJOS.forEach(f=>{
+    t += '\n• '+f.g+' (fijo, siempre primero)\n';
+    t += '   '+f.codigos.join(' y ')+' · '+f.dest+' · '+f.nota+'\n';
+  });
+  grupos.forEach(gr=>{
+    t += '\n• '+gr.g+'\n';
+    gr.items.forEach(x=>{
+      t += '   '+(x.rol==='p'?'★ PRIORIDAD: ':'Segundo: ')+x.c.c+' · '+x.c.d.trim()+(x.c.dest?' · '+x.c.dest:'')+' · '+
+           (x.falt ? fmt(x.falt)+' kg a producir' : 'sin faltante')+'\n';
+    });
+  });
+  return t;
+}
+
+function viewProg(R){
+  const P = window.PRIOR;
+  const wrap = document.createElement('div');
+
+  if(!P){
+    wrap.appendChild(el(`<div class="panel"><div class="phead"><div class="ptitle">Programa de menudencias</div></div>
+      <div class="empty">Conectando con Firebase… Si no avanza, revisá la conexión a internet y recargá la página.</div></div>`));
+    return wrap;
+  }
+
+  /* ---- sin sesion: formulario de ingreso ---- */
+  if(!P.user){
+    let guardado=''; try{ guardado = localStorage.getItem('prog_email')||''; }catch(e){}
+    const p = el(`<div class="panel"><div class="phead"><div class="ptitle">Programa de menudencias</div>
+      <div class="phint">Ingresá con el usuario compartido para elegir qué se produce</div></div>
+      <div class="ofform"><div class="offields">
+        <label>Correo<input type="text" id="pgEmail" value="${guardado}" autocomplete="username"></label>
+        <label>Contraseña<input type="password" id="pgPass" autocomplete="current-password"></label>
+        <button class="mini go" id="pgIngresar">Ingresar</button>
+      </div>${P.error?`<div class="ofcod" style="margin:9px 0 0;color:var(--rojo)">${P.error}</div>`:''}</div></div>`);
+    wrap.appendChild(p);
+    setTimeout(()=>{
+      const go=()=>{
+        const e=document.getElementById('pgEmail').value.trim(), pw=document.getElementById('pgPass').value;
+        if(!e||!pw) return;
+        try{ localStorage.setItem('prog_email', e); }catch(x){}
+        P.login(e, pw);
+      };
+      const b=document.getElementById('pgIngresar'); if(b) b.onclick=go;
+      const pw=document.getElementById('pgPass'); if(pw) pw.onkeydown=ev=>{ if(ev.key==='Enter') go(); };
+    });
+    return wrap;
+  }
+
+  /* ---- con sesion ---- */
+  const sel = P.data || {};          // { claveGenerico: {p, s} }
+  const elegidos = new Set();
+  Object.values(sel).forEach(v=>{ const x=leerSel(v); if(x.p) elegidos.add(x.p); if(x.s) elegidos.add(x.s); });
+  const q = norm(S.pq||'').trim();
+  const base = DATA.codigos.filter(c=>!c.virtual && (c.stock>0 || R[c.c].vendido>0 || elegidos.has(c.c)));
+  const gens = [...new Set(base.map(c=>c.g))].sort();
+  let infos = base.map(c=>infoProg(c,R));
+  if(S.pg) infos = infos.filter(x=>x.c.g===S.pg);
+  if(q) infos = infos.filter(x=>{
+    const t=norm(x.c.c+' '+x.c.d+' '+x.c.g+' '+(x.c.dest||''));
+    return q.split(/\s+/).every(w=>t.includes(w)); });
+  if(S.pfalt) infos = infos.filter(x=>x.falt>0);
+
+  const porGen={}; infos.forEach(x=>(porGen[x.c.g]=porGen[x.c.g]||[]).push(x));
+  let body='';
+  Object.keys(porGen).sort().forEach(g=>{
+    const xs = porGen[g].sort((a,b)=>b.falt-a.falt || b.stock-a.stock);
+    const tf = xs.reduce((a,x)=>a+x.falt,0);
+    const raw = sel[gKey(g)];
+    const {p,s} = leerSel(raw);
+    const desde = raw && raw.ts ? new Date(raw.ts).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'}) : '';
+    const tags = (p||s)
+      ? `${p?`<span class="tag t-war">★ ${p}</span>`:''} ${s?`<span class="tag t-ok">${s}</span>`:''}${desde?` <span class="wk" style="font-size:11px">desde ${desde}</span>`:''}`
+      : '<span class="n z">sin elegir</span>';
+    body += `<tr class="grp"><td class="l" colspan="4">${g}</td>
+      <td><span class="n ${tf?'r':'z'}">${tf?fmt(tf):'—'}</span></td><td></td><td>${tags}</td></tr>`;
+    xs.forEach(x=>{
+      const esPri = p===x.c.c, esSel = esPri || s===x.c.c;
+      const tarde = x.prox!=null && x.prox<DATA.semanaCorte;
+      body += `<tr class="row${esSel?' psel':''}"><td class="l"><span class="cod">${x.c.c}</span>${x.c.consumo?'<span class="tagc">consumo</span>':''}<div class="dsc">${x.c.d}</div></td>
+        <td class="l"><span class="wk" style="font-size:12px">${x.c.dest||'—'}</span></td>
+        <td><span class="n ${x.stock?'':'z'}">${x.stock?fmt(x.stock):'—'}</span></td>
+        <td><span class="n ${x.vendido?'':'z'}">${x.vendido?fmt(x.vendido):'—'}</span></td>
+        <td><span class="n ${x.falt?'r':'z'}">${x.falt?fmt(x.falt):'—'}</span></td>
+        <td>${x.prox!=null?`<span class="${tarde?'late-t':''}">W${x.prox}${tarde?' ⚠':''}</span>`:'—'}</td>
+        <td><div class="prio"><button class="pbtn${esSel?' on':''}" data-pr="${gKey(g)}|${x.c.c}">${esSel?'✓ A producir':'Producir'}</button>${
+          esSel?`<button class="pbtn pri${esPri?' on':''}" data-pp="${gKey(g)}|${x.c.c}" ${esPri?'disabled':''}>${esPri?'★ Prioridad':'☆ Prioridad'}</button>`:''}</div></td></tr>`;
+    });
+  });
+  if(!body) body = `<tr><td colspan="7" class="empty">Ningún código coincide con el filtro.</td></tr>`;
+
+  const asignar = el(`<div class="panel" id="asignarPanel"><div class="phead">
+      <div class="ptitle">Elegir qué se produce</div>
+      <div class="phint">Hasta 2 códigos por genérico, uno con ★ Prioridad · los cambios los ven al instante todos los que tengan abierto el programa · Faltante = por cargar − stock</div>
+      <div class="tools">
+        <input class="inp" id="pgQ" placeholder="Buscar código, producto o destino" value="${S.pq||''}">
+        <select class="inp" id="pgG"><option value="">Todos los genéricos</option>${gens.map(g=>`<option ${S.pg===g?'selected':''}>${g}</option>`).join('')}</select>
+        <button class="chip ${S.pfalt?'on':''}" id="pgFalt">Solo con faltante</button>
+        <button class="chip" id="pgSalir">Salir</button>
+      </div></div>
+      ${P.error?`<div class="ofcod" style="margin:10px 16px 0;color:var(--rojo)">${P.error}</div>`:''}
+      <div class="scroll mtx"><table><thead><tr><th class="l">Producto</th><th class="l">Destino</th><th>Stock</th>
+        <th>Por cargar</th><th>Faltante</th><th>Próx. carga</th><th>Producir</th></tr></thead><tbody>${body}</tbody></table></div></div>`);
+  wrap.appendChild(asignar);
+
+  /* ---- programa para planta ---- */
+  const grupos = armarGrupos(sel, R);
+  const nCod = grupos.reduce((a,gr)=>a+gr.items.length,0);
+  const filas = grupos.map(gr=>gr.items.map((x,i)=>`<tr class="row${i===0?' gsep':''}"><td class="l">${x.c.g}</td>
+      <td class="l"><span class="cod">${x.c.c}</span><div class="dsc">${x.c.d}</div></td>
+      <td class="l"><span class="wk" style="font-size:12px">${x.c.dest||'—'}</span></td>
+      <td><span class="n ${x.falt?'r':'z'}">${x.falt?fmt(x.falt):'—'}</span></td>
+      <td class="l">${x.rol==='p'?'<span class="tag t-war">★ Prioridad</span>':'<span class="tag t-off">Segundo</span>'}</td></tr>`).join('')).join('');
+  const filasFijas = PROG_FIJOS.map(f=>f.codigos.map((cod,i)=>`<tr class="row${i===0?' gsep':''}"><td class="l">${f.g}</td>
+      <td class="l"><span class="cod">${cod}</span><div class="dsc">${f.g}</div></td>
+      <td class="l"><span class="wk" style="font-size:12px">${f.dest}</span></td>
+      <td><span class="n" style="color:var(--ink2)">Continuo</span></td>
+      <td class="l"><span class="tag t-off">Fijo · simultáneo</span></td></tr>`).join('')+
+      `<tr class="row"><td class="l" colspan="5" style="font-size:12px;color:var(--ink2)">${f.nota}</td></tr>`).join('');
+  const prog = el(`<div class="panel" id="programaPanel"><div class="phead">
+      <div class="ptitle">Programa de menudencias</div>
+      <div class="phint">${fechaLarga()} · ${grupos.length+PROG_FIJOS.length} genéricos · ${nCod+PROG_FIJOS.reduce((a,f)=>a+f.codigos.length,0)} códigos a producir</div>
+      <div class="tools noprint">
+        <button class="chip" id="pgCopiar">Copiar texto</button>
+        <button class="chip" id="pgImprimir">Imprimir / guardar PDF</button>
+        <button class="chip" id="pgLimpiar">Limpiar selección</button>
+      </div></div>
+      <div class="scroll"><table><thead><tr><th class="l">Genérico</th>
+        <th class="l">Código a producir</th><th class="l">Destino</th><th>Kg a producir</th><th class="l">Orden</th></tr></thead><tbody>${filasFijas}${filas}</tbody></table></div>
+      ${grupos.length ? '' : `<div class="empty">Todavía no elegiste otros códigos. Marcá "Producir" en hasta dos por genérico y se suman al programa.</div>`}</div>`);
+  wrap.appendChild(prog);
+
+  /* cambia la seleccion de un generico: max 2 codigos, uno es la prioridad */
+  const mover = (gk, cod, accion)=>{
+    let {p,s} = leerSel((P.data||{})[gk]);
+    if(accion==='pri'){
+      if(cod===s){ s=p; p=cod; }
+    } else {
+      if(cod===p){ p=s; s=null; }          // quita la prioridad: el segundo pasa a ser prioridad
+      else if(cod===s){ s=null; }
+      else if(!p){ p=cod; }
+      else { s=cod; }                      // agrega (o reemplaza) el segundo
+    }
+    P.set(gk, p ? (s?{p,s}:{p}) : null);
+  };
+  const partir = str => { const i=str.lastIndexOf('|'); return [str.slice(0,i), str.slice(i+1)]; };
+
+  setTimeout(()=>{
+    asignar.querySelectorAll('[data-pr]').forEach(b=>b.onclick=()=>{ const [gk,cod]=partir(b.dataset.pr); mover(gk,cod,'sel'); });
+    asignar.querySelectorAll('[data-pp]').forEach(b=>b.onclick=()=>{ const [gk,cod]=partir(b.dataset.pp); mover(gk,cod,'pri'); });
+    const qi=document.getElementById('pgQ');
+    if(qi){ qi.oninput=e=>{ S.pq=e.target.value; render();
+        const n=document.getElementById('pgQ'); if(n){n.focus(); n.setSelectionRange(n.value.length,n.value.length);} };
+      qi.onkeydown=e=>{ if(e.key==='Escape'){S.pq='';render();} }; }
+    const gi=document.getElementById('pgG'); if(gi) gi.onchange=e=>{S.pg=e.target.value;render();};
+    const fi=document.getElementById('pgFalt'); if(fi) fi.onclick=()=>{S.pfalt=!S.pfalt;render();};
+    const so=document.getElementById('pgSalir'); if(so) so.onclick=()=>P.logout();
+    const cp=document.getElementById('pgCopiar');
+    if(cp) cp.onclick=()=>{
+      const txt=textoPrograma(grupos);
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+        .then(()=>{ cp.textContent='Copiado ✓'; setTimeout(()=>{cp.textContent='Copiar texto';},1500); })
+        .catch(()=>{ window.prompt('Copiá el texto del programa:', txt); });
+    };
+    const im=document.getElementById('pgImprimir');
+    if(im) im.onclick=()=>{
+      document.body.classList.add('print-prog');
+      window.addEventListener('afterprint',()=>document.body.classList.remove('print-prog'),{once:true});
+      window.print();
+    };
+    const li=document.getElementById('pgLimpiar');
+    if(li) li.onclick=()=>{ if(window.confirm('¿Borrar TODA la selección? Lo ven todos los usuarios.')) P.limpiar(); };
+  });
+  return wrap;
+}
+
 /* ---- faena ---- */
 function renderFaena(){
   document.getElementById('fgrid').innerHTML = DATA.semanas.map((s,i)=>
@@ -1334,5 +1570,68 @@ function isoWeek(d){
 })();
 renderFaena(); render();
 </script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+import { getDatabase, ref, onValue, set, remove } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDNiruK_j-1Nf09eDbl4G5ix3eVe3GFlHo",
+  authDomain: "seguimiento-menudencias-anb.firebaseapp.com",
+  databaseURL: "https://seguimiento-menudencias-anb-default-rtdb.firebaseio.com",
+  projectId: "seguimiento-menudencias-anb",
+  storageBucket: "seguimiento-menudencias-anb.firebasestorage.app",
+  messagingSenderId: "974200723687",
+  appId: "1:974200723687:web:17fc79f74dd8d878206a42",
+  measurementId: "G-RN0M9WXVP6"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
+
+const MSG = {
+  'auth/invalid-credential':'Correo o contraseña incorrectos.',
+  'auth/wrong-password':'Correo o contraseña incorrectos.',
+  'auth/user-not-found':'Correo o contraseña incorrectos.',
+  'auth/invalid-email':'El correo no tiene un formato válido.',
+  'auth/too-many-requests':'Demasiados intentos. Esperá unos minutos y volvé a probar.',
+  'auth/network-request-failed':'Sin conexión con Firebase. Revisá internet.'
+};
+const refresh = () => { if(typeof window.render === 'function') window.render(); };
+
+const P = window.PRIOR = {
+  user:null, data:{}, error:'', unsub:null,
+  async login(email, pass){
+    P.error='';
+    try{ await signInWithEmailAndPassword(auth, email, pass); }
+    catch(e){ P.error = MSG[e.code] || ('No se pudo ingresar ('+(e.code||'error')+').'); refresh(); }
+  },
+  logout(){ return signOut(auth); },
+  set(gk, val){
+    const r = ref(db, 'programa/'+gk);
+    const op = val ? set(r, Object.assign({}, val, {ts:Date.now()})) : remove(r);
+    return op.catch(e=>{ P.error='No se pudo guardar el cambio ('+(e.code||'error')+').'; refresh(); });
+  },
+  limpiar(){
+    return remove(ref(db,'programa')).catch(e=>{ P.error='No se pudo limpiar ('+(e.code||'error')+').'; refresh(); });
+  }
+};
+
+onAuthStateChanged(auth, user=>{
+  P.user = user;
+  if(P.unsub){ P.unsub(); P.unsub=null; }
+  if(user){
+    P.error='';
+    P.unsub = onValue(ref(db,'programa'),
+      snap=>{ P.data = snap.val() || {}; refresh(); },
+      err=>{ P.error='No se puede leer el programa ('+(err.code||'error')+').'; refresh(); });
+  } else {
+    P.data = {};
+  }
+  refresh();
+});
+</script>
+
 </body>
 </html>
