@@ -542,7 +542,7 @@ function estadoVenta(v, R){
 }
 
 /* ============ RENDER ============ */
-const TABS=[['proy','Proyección'],['com','Comercial'],['vta','Seguimiento de ventas'],['rot','Rotación'],['al','Alertas'],['prog','Programa']];
+const TABS=[['proy','Proyección'],['com','Comercial'],['vta','Seguimiento de ventas'],['rot','Rotación'],['prog','Programa']];
 
 let _lastTab=null;
 function render(){
@@ -570,7 +570,6 @@ function render(){
   if(S.tab==='com')  v.appendChild(viewCom(R));
   if(S.tab==='vta')  v.appendChild(viewVtas(R, ventas));
   if(S.tab==='rot')  v.appendChild(viewRot(R));
-  if(S.tab==='al')   v.appendChild(viewAlertas(R, ventas));
   if(S.tab==='prog') v.appendChild(viewProg(R));
   document.getElementById('foot').textContent =
     `Peso por res: tabla de la proyección. Stock: total del código, todas las cámaras. Producción proyectada a ${DATA.semanas.length} semanas desde W${DATA.semanas[0].w}.`;
