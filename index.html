@@ -1211,6 +1211,7 @@ function bandaFiltro(R, ventas, v){
         ${e.flt>1?`<span><i style="background:var(--rojo)"></i><b style="color:var(--rojo)">${fmt(e.flt)} kg sin cubrir</b></span>`:''}</div>
       ${herm.length?`<div class="herm">Del mismo pedido: ${herm.map(x=>`<button class="chip" data-h="${x.idx}">${x.nro} · ${x.week||'s/f'}</button>`).join('')}</div>`:''}
       ${shipsHTML(v)}
+      ${ctrlCompHTML(v)}
     </div></div>`);
   setTimeout(()=>d.querySelectorAll('[data-h]').forEach(b=>b.onclick=()=>{S.venta=+b.dataset.h;render();}));
   return d;
@@ -1218,6 +1219,27 @@ function bandaFiltro(R, ventas, v){
 
 /* detalle de shipments ya creados de una venta (pendientes de carga) + lo que
    todavia no tiene shipment asignado. Solo informativo, dentro del panel de detalle. */
+const GRUPOS_COMP=[['Hígado Mirasco',['FD608000','FD608002']],['Mondongo Perú',['FD615001','FD615004']]];
+/* cuadro de control: para las ventas con dos codigos de un mismo grupo, muestra vendido, cargado y como se compenso */
+function ctrlCompHTML(v){
+  return GRUPOS_COMP.map(([nom,cods])=>{
+    const en = cods.filter(c=>(v.contratado||{})[c]!=null || (v.items||{})[c]!=null);
+    if(en.length<2) return '';
+    const filas = en.map(c=>{
+      const vend=(v.contratado||{})[c]||0, carg=(v.cargado||{})[c]||0, saldo=(v.items||{})[c]||0;
+      const aj=(v.comp||[]).filter(x=>x.c===c).reduce((a,x)=>a+x.kg,0);
+      const d=vend-carg;
+      return `<tr><td class="l"><span class="cod">${c}</span> <span class="wk" style="font-size:11.5px">${(CODM[c]||{}).d||''}</span></td>
+        <td><span class="n">${fmt(vend)}</span></td><td><span class="n">${fmt(carg)}</span></td>
+        <td><span class="n ${d<0?'r':''}">${fmt(d)}${d<0?' (cargado de más)':''}</span></td>
+        <td><span class="n ${aj?'a':'z'}">${aj?'−'+fmt(aj):'—'}</span></td>
+        <td><span class="n"><b>${fmt(saldo)}</b></span></td></tr>`;
+    }).join('');
+    return `<div class="ships"><div class="shtit">Control de compensación · ${nom} · lo cargado de más en un código se descuenta del otro</div>
+      <div class="scroll"><table><thead><tr><th class="l">Código</th><th>Vendido</th><th>Cargado</th><th>Vendido − cargado</th><th>Compensado</th><th>Saldo final</th></tr></thead><tbody>${filas}</tbody></table></div><div class="wk" style="font-size:11.5px;margin-top:6px">Saldo final = "pendiente de carga" que informa el archivo de ventas, menos lo compensado.</div></div>`;
+  }).join('');
+}
+
 function shipsHTML(v){
   const ships = shipsDeVenta(v.nro);
   if(!ships.length) return '';
