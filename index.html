@@ -737,6 +737,8 @@ function viewProy(R){
             if(!norm(S.q).trim().split(/\s+/).every(w=>t.includes(w))) return false;}
     return c.stock>0 || R[c.c].vendido>0 || R[c.c].prodTotal>0;
   });
+  const gensVis = [...new Set(filas.map(c=>c.g))];
+  const todosCol = gensVis.length>0 && gensVis.every(g=>S.colapso[g]);
   const p = el(`<div class="panel">
     <div class="phead">
       <div class="ptitle">Proyección por código</div>
@@ -744,6 +746,7 @@ function viewProy(R){
       <div class="tools">
         <input class="inp" id="q" placeholder="Buscar código o producto" value="${S.q}">
         <select class="inp" id="gsel"><option value="">Todos los genéricos</option>${gens.map(g=>`<option ${S.gen===g?'selected':''}>${g}</option>`).join('')}</select>
+        <button class="pbtn" id="tgTodo" style="padding:6px 12px;font-size:12.5px" title="Contrae o expande todos los grupos de la tabla">${todosCol?'▾ Expandir todo':'▸ Contraer todo'}</button>
       </div>
     </div><div class="scroll mtx"></div>
     <div class="phead" style="border-top:1px solid var(--line2);border-bottom:none">
@@ -813,6 +816,7 @@ function viewProy(R){
       const n=document.getElementById('q'); if(n) n.focus(); } };
     document.getElementById('gsel').onchange=e=>{S.gen=e.target.value;render();};
     p.querySelectorAll('.grp').forEach(t=>t.onclick=()=>{S.colapso[t.dataset.g]=!S.colapso[t.dataset.g];render();});
+    document.getElementById('tgTodo').onclick=()=>{ gensVis.forEach(g=>{ S.colapso[g]=!todosCol; }); render(); };
   });
   return p;
 }
