@@ -742,11 +742,11 @@ function viewProy(R){
   const p = el(`<div class="panel">
     <div class="phead">
       <div class="ptitle">Proyección por código</div>
+      <button class="pbtn" id="tgTodo" style="padding:6px 12px;font-size:12.5px;white-space:nowrap;flex:none" title="Contrae o expande todos los grupos de la tabla">${todosCol?'▾ Expandir todo':'▸ Contraer todo'}</button>
       <div class="phint">Stock − por cargar + producción = a vender · "por cargar" es el saldo de venta que todavía no se despachó</div>
       <div class="tools">
         <input class="inp" id="q" placeholder="Buscar código o producto" value="${S.q}">
         <select class="inp" id="gsel"><option value="">Todos los genéricos</option>${gens.map(g=>`<option ${S.gen===g?'selected':''}>${g}</option>`).join('')}</select>
-        <button class="pbtn" id="tgTodo" style="padding:6px 12px;font-size:12.5px" title="Contrae o expande todos los grupos de la tabla">${todosCol?'▾ Expandir todo':'▸ Contraer todo'}</button>
       </div>
     </div><div class="scroll mtx"></div>
     <div class="phead" style="border-top:1px solid var(--line2);border-bottom:none">
