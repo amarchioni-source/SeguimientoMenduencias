@@ -342,6 +342,9 @@ tr.tot td .num{color:#fff}
 .pbtn{border:1px solid var(--line);border-radius:var(--r);padding:3px 10px;font-size:12px;color:var(--ink2);background:#fff}
 .pbtn:hover{border-color:var(--frio);color:var(--frio)}
 .pbtn.on{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
+.btn-todo{font-family:"Barlow Condensed",sans-serif;font-size:17px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--frio);color:#fff;border:0;border-bottom:3px solid var(--etiq);border-radius:4px;padding:7px 20px;cursor:pointer;white-space:nowrap;flex:none;box-shadow:0 2px 7px rgba(14,76,107,.4)}
+.btn-todo:hover{background:#0A3A52}
+.btn-todo:active{transform:translateY(1px);box-shadow:none}
 tr.row.psel td{background:#E8F5EE}
 .pbtn.pri.on{background:var(--amb);border-color:var(--amb);color:#fff}
 .pbtn:disabled{cursor:default}
@@ -742,7 +745,7 @@ function viewProy(R){
   const p = el(`<div class="panel">
     <div class="phead">
       <div class="ptitle">Proyección por código</div>
-      <button class="pbtn" id="tgTodo" style="padding:6px 12px;font-size:12.5px;white-space:nowrap;flex:none" title="Contrae o expande todos los grupos de la tabla">${todosCol?'▾ Expandir todo':'▸ Contraer todo'}</button>
+      <button class="btn-todo" id="tgTodo" title="Contrae o expande todos los grupos de la tabla">${todosCol?'▾ Expandir todo':'▸ Contraer todo'}</button>
       <div class="phint">Stock − por cargar + producción = a vender · "por cargar" es el saldo de venta que todavía no se despachó</div>
       <div class="tools">
         <input class="inp" id="q" placeholder="Buscar código o producto" value="${S.q}">
