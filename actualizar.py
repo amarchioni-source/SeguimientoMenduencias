@@ -157,6 +157,48 @@ def armar_ventas(prev, saldos, puertos, ships_rows):
     return ventas, list(sh.values()), faltan_semana
 
 
+DIAS = ['lun', 'mar', 'mie', 'jue', 'vie', 'sab']
+PLAN = Path(__file__).with_name('plan_faena.json')
+
+
+def aplicar_plan_faena(semanas, corte):
+    """plan_faena.json: {"47": {"total": 3900, "kosher": 2500, "dias": {"lun": .., "mar": .., ...}}}
+    Para cada semana del plan pisa faena/sinKosher. En la semana del corte descuenta los dias
+    ya faenados (los anteriores al dia del corte: el lunes va completa, el martes sin el lunes...).
+    El sin kosher se descuenta en la misma proporcion que el total."""
+    if not PLAN.exists():
+        return semanas
+    plan = json.loads(PLAN.read_text(encoding='utf-8'))
+    sc, dia = corte.isocalendar()[1], corte.weekday()  # lunes = 0
+    for s in semanas:
+        p = plan.get(str(s['w']))
+        if not p:
+            continue
+        total, sink = p['total'], p['total'] - p['kosher']
+        dias, kd = p.get('dias', {}), p.get('kosher_dia')
+        if dias and kd is not None and all(d in dias for d in DIAS[:5]):
+            # plan diario completo con kosher por dia: se proyecta exacto lo que falta faenar
+            quedan = [d for d in DIAS if d in dias and (s['w'] != sc or DIAS.index(d) >= dia)]
+            s['faena'] = sum(dias[d] for d in quedan)
+            s['sinKosher'] = sum(max(0, dias[d] - kd) for d in quedan)
+            if sum(dias.values()) != total:
+                print(f"OJO W{s['w']}: los dias suman {sum(dias.values())} y el total dice {total}")
+            print(f"Faena W{s['w']}: {s['faena']} ({s['sinKosher']} sin kosher)")
+            continue
+        if s['w'] == sc and dia > 0:
+            dias = p.get('dias', {})
+            hechos = DIAS[:min(dia, len(DIAS))]
+            falta_dato = [d for d in hechos if d not in dias]
+            if falta_dato:
+                raise SystemExit(f"plan_faena.json W{sc}: falta la faena de {', '.join(falta_dato)} para descontar")
+            hecho = sum(dias[d] for d in hechos)
+            sink = round(sink * (total - hecho) / total) if total else 0
+            total -= hecho
+        s['faena'], s['sinKosher'] = max(0, total), max(0, sink)
+        print(f"Faena W{s['w']}: {s['faena']} ({s['sinKosher']} sin kosher)")
+    return semanas
+
+
 def hoja(wb, nombre):
     """Busca la hoja por nombre exacto o por nombre contenido (ej. '5 - Actualizar TD - Puertos')."""
     if nombre in wb.sheetnames:
@@ -195,7 +237,8 @@ def main():
         faltan = [n for n in faltan if n not in sem]
 
     sc = corte.isocalendar()[1]
-    semanas = [s for s in prev['semanas'] if s['w'] >= sc] or prev['semanas']
+    semanas = [dict(s) for s in prev['semanas'] if s['w'] >= sc] or prev['semanas']
+    semanas = aplicar_plan_faena(semanas, corte)
     data = dict(corte=corte.isoformat(), semanaCorte=sc, semanas=semanas, codigos=codigos,
                 ventas=ventas, ships=ships, partidas=partidas)
 
