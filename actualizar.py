@@ -157,6 +157,16 @@ def armar_ventas(prev, saldos, puertos, ships_rows):
     return ventas, list(sh.values()), faltan_semana
 
 
+def hoja(wb, nombre):
+    """Busca la hoja por nombre exacto o por nombre contenido (ej. '5 - Actualizar TD - Puertos')."""
+    if nombre in wb.sheetnames:
+        return wb[nombre]
+    for n in wb.sheetnames:
+        if nombre.lower() in n.lower():
+            return wb[n]
+    raise SystemExit(f"No encuentro la hoja '{nombre}'. Hojas: {wb.sheetnames}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('stock'); ap.add_argument('ventas')
@@ -176,8 +186,8 @@ def main():
 
     codigos, partidas, sin_config = armar_stock(prev, leer_stock(a.stock), corte)
     wb = openpyxl.load_workbook(a.ventas, read_only=True, data_only=True)
-    ventas, ships, faltan = armar_ventas(prev, leer_saldos(wb['12-Saldos por ventas']),
-                                         leer_puertos(wb['Puertos']), leer_ships(wb['11-Shipments']))
+    ventas, ships, faltan = armar_ventas(prev, leer_saldos(hoja(wb, 'Saldos por ventas')),
+                                         leer_puertos(hoja(wb, 'Puertos')), leer_ships(hoja(wb, 'Shipments')))
     if a.semanas:
         sem = json.loads(a.semanas)
         for v in ventas:
